@@ -1,0 +1,442 @@
+Pour le makefile:
+bison -o -d -y -v y.tab.c *.y
+l'analyseyr lexical en a besoin pour terminer les 2 etapes soit:
+appel a y.tab.c
+et execution de :
+flex -o $(BUILD)/$@ y.tab.c *.l bien sur
+puis construction du myml en utilisant:
+->y.tab.c & lex.yy.c.
+(avec $(src)/table des symboles table des chaines attribut.c qui sera inclus par la table en question.)
+=>construction du mymtl faite.
+2 choix:
+->sur ./tester avec tester.c et Attribut.c (les fichiers sont construits ainsi et la pile via Atttribut.c)
+-> make test.
+Ou bien d'une façon classique en envoyant dans le fichier d'origine les .fp correspondants depuis les tst/*.ml à tester depuis la forge. (batterie de tests)
+OU bien ./compile.sh nom_du_fichier`.ml` qui va créer via l'inclusion de Pcode.h (traduction des macros en vraies instructions c puis inclusion de ../test.p qui remplacera le tout par le tout ainsi l'execution de test1 affichera la stack a la fin via la fonction dans ../Pcode.h repertoriee.) 
+Rq:
+On inclut pas dans le main le test??.fp car il peut y avoir des erreurs si ce n'est pas fonctionnelle. Par exemple le test6.fp donne une vraie compilation apres ./myml test6.ml qui sera inclut dans le main pour faire une fonction à l'intèrieur d'une fonction pour la rendre une vraie fonction en C, ainsi le Pcode.h va traduire et imprimer la stack comme voulu. 
+SEULE DIFFERENCE:
+make puis compile.sh $1 permet via test??.p/fp de construire via LE PCODE.h le code C qui saura imprimer la stack correctement. (macros, éléments élémentaires définis)
+make puis ./myml args[1] permet de construire un test??.p/fp qui s'executer just in time en montrant le P-code soit le code compile soit la traduction du language standard ml(ocaml~) vers le p-code qui se batit sur des stacks.
+les variables globales avec let correspondent a des empilations dans la pile le premier de empile() et qui fera printf("LOAD(fp+%d)\n",$$.offset);
+les nombres normaux seront empilés normalement via LOADI ou LOADF en printf pour montrer le code compilé. 
+On remonte avec $$=$2 dans def_id puis on l'insère dans la table des symboles via add_symbol_value($2,create_symb());
+Puis si cela remonte comme on a dit vers let_def cela va donner $$=$1 puis inst: let_def va donner:
+{
+if(has_multiple_value($1)){
+remove_symbol_value($1);//suppression de la derniere variable locale
+fprintf(out, "STORE(%d)\n",get_symbol_value($1).offset);depile();
+}
+|
+exp {fprintf(out,"DROP\n");depile();
+}
+;
+Apres le store vu qu'on a supprime la derniere valeur locale let let x=let y=3 in (1+y); PAR EXEMPLE on va stocker que la variable globale qui nous intèresse via l'offset sans faire unt abeau d'offset, ca se decale automatiquement sinon inst c'est juste une expr dans ce cas on affiche le necessaire on faire le drop pour vider la pile puis depile comme accessoire.
+(en sommet: x=4.)
+============================
+Avec cela, on a fini avec:
+calculatrice.
+declarations implicictes et sequentielles.
+declarations locales, portée et masquage(!!).
+=====================================================
+=>Conditionnelles simples et imbriquées (les points 3 et 4):
+rq: on démarre depuis le 0 et jusqu'à3~4 fait une note de 10->12 max.
+On a oublié de dire que dans le .l on a ffait:
+{integer} {yylval.n=atoi(yytext); return NUM;}
+{identifier} {yylval.a=string_to_sid(yytext); return ID;}
+avec %union{
+int n;
+void* a;
+char* c;
+}
++typage des tokens: 
+<c>STRING ; <a>ID ; <n>NUM 
+puis:
+%type<a> def_id
+%type<a> let_def
+%type<a> def_fun
+%type<a> fun_head
+%type<a> name_funcall
+
+%start prog 
+
+%%
+
+ /* a program is a list of instruction */
+
+prog : inst PV {
+}
+
+| prog inst PV {
+}
+;
+sinon erreurs de compilation triviales. 
+Un id déclaré dans la table des symboles via le sid, non déclaré dans la table des chaînes tous mêmes adresses, let z=y+x=>stockage mais y+x on s'en fiche de ce que y+x occupera dans la pile. 
+comme 1;2+3; dont la pile est totalement vide à la fin avec le DROP.
+ON LAISSE DEF_FUN FUN_HEAD, ID_LIST après. 
+=>pour exp: arith_exp
+|let_exp
+;
+arith_expre: MOINS arith_expr %prec UNA //désignation de -a qu'on considère comme -(a) ou bien 0-a comme optimisation de le faire a droite (al'envers).
+{printf("out",LOAD(-1)\n");fprintf("out,MULTI\n");}
+| 
+.
+.
+.(pour les autres c'est trivial, avec des dépilements!) laissons atom_expr
+qui donne:
+NUM {fprintf(out,"LOAD(%d)\n",$1);empile();}
+|FLOAT
+|STRING {}
+|ID
+{
+fprintf(out,LOAD(fp+%d\n",get_symbol_value($1).offset);empile();
+}
+ainsi de suite..
+On a oublié d'ajouté cela y compris les let dans les let_def:
+
+control_exp : if_exp
+;/*logique*/
+
+_______________________________________________________________________________________________
+if_exp : if cond then atom_exp else atom_exp //appels aux dérivations d'abord.
+{
+//if,cond,then non terminaux, à dériver.(int label_conuter=0 tt au début)
+  int label = $<n>3;//dernier label avec les dépilements, on en revient au cas restant soit label=0.(cas restant à traiter!!! FAIT)
+  fprintf(out, "L%d:\n", 2*label+1);//qui vaudrait 1. L1:
+}
+;
+
+if : IF;
+cond : LPAR bool RPAR;
+then : THEN           
+{
+  int label = label_counter++; //ouverture d'un label.
+  fprintf(out, "IFN(L%d)\n", 2*label); depile();//then cas vrai le contraire d'un cas faux soit
+  //un label de plus soit 2*label pour démarrer de 2.(dernier cas) [[casnumero: 2]] 
+  $<n>$ = label;//trivial.
+  //il faut dépiler le bool de test ça permet de négliger le label et de remonter ~DRCP~ à label=0//.
+};
+else : ELSE           
+{
+  int label = $<n>-1;//label retourné contre les faux soit $<n>-1 pour remonter l'arbre depuis la triviale structure du faux puis du vrai.
+  fprintf(out, "GOTO(L%d)\n", 2*label+1); //c'est le premier normalement et le label est mis à 0 soit 2*label+1.[[1er cas]]<=>casnumero: 3.
+  //<=>caus faux, on remonte via: goto L1 le deuxième en cours du label.(1er cas normalement avec les $<>$.
+ }; 
+  
+/*
+donc en resume:
+let if_exp ca genere un label qui est celui de then normalement soit int label = $<n>3 puis ca remonte apres les derivations a un print de L%d\n, 2*label+1 ce qui vaut 1 cad. dernier cas. La remontée donnee la cond qui appelle le bool puis le then qui doit incrementer le label(nouveau au THEN) et faire un print de IFN(L%d) de 2*label puis dépilement, cela permet en conditions normales de considérer le cas extrème soit depuis 0 le cas 0 puis faire $<n>$=label, reste le else, là il faut faire attention car on peut avoir EQ IFN LO suite instructions L0: ... L1:... ce qui équivalent au code C à if then ... {if(le même maintrisé) then..} puis else: tout à la FIN. donc ce qui vaut faire c'est remonter l'arbre pour avoir le label le plus loin celui dont a démarré le if soit $<n>-1 puis faire un GOTO avec 2*label+1 car int label=0 .
+VOILA.
+Il faut bien manier les expressions.!!*/
+Reprise rapide pour terminer au moins 10:
+
+	  //a apprendre.
+	  if_exp : if cond then atom_exp else atom_exp /*appels aux dérivations d'abord.*/
+	{
+	  int label = $<n>3;
+	  fprintf(out, "L%d:\n", 2*label+1);
+	}
+	;
+
+	if : IF;
+	cond : LPAR bool RPAR;
+	then : THEN           
+	{
+	  int label = label_counter++; 
+	  fprintf(out, "IFN(L%d)\n", 2*label); depile(); 
+	  $<n>$ = label;
+	};
+	else : ELSE           
+	{
+	  int label = $<n>-1;
+	  fprintf(out, "GOTO(L%d)\n", 2*label+1); 
+	 }; 
+	  //a apprendre.
+	 ..///et a comprendre!!!!!.///
+	  //le else puis retour au if puis re-travail sur le then.
+	  //ordre des $$: else, then, if.(if entraînant des conditions(instructions)puis un else
+	  laissé à part.
+	  
+	  
+  fprintf(out, "L%d:\n", 2*label);
+  //toujours les IFN L<NUMBER_pair> puis:
+  //LOAD
+  //GOTO impair
+  //L<NUMBER imapir>
+  //LOAD...
+  //dernier label en imapir (attention)
+};
+________________________________________________________________________________________________
+--------------------------------------------------------------------
+
+let_exp : let_def IN atom_exp 
+{
+  fprintf(out, "DRCP\n"); depile();
+  remove_symbol_value($1);
+  //on a calulé l'expression locale à affecter on doit écraser une valeur et la remplacer d'où le rôle du DRCP, par exemple let x=let x=3 in (1+x) on va empiler 3,1,puis x soit fp+0 avec LOAD addi on aura: 4 puis fp+0 avec offset 0 puis fp+1 avec offset 1 mais avec DRCP ce x va prendre la place de l'ancien du coup x vaudra 4 et ci-dessus 4 comme prévu, on doit dépiler à la fin pour avoir que 4 et l'ancier x qui est fp+0 pointe vers 4, c'est un peu tordu mais ça marche comme cela. Puis on faire remove_symbol_value($1) pour affacer les valeurs locales|||/.   
+}
+| let_def IN let_exp
+{
+  fprintf(out, "DRCP\n"); depile();
+  remove_symbol_value($1);
+  //c'est récursif on fait la première procédure, si ré-appel on refait ce qu'on a fait avant, ce qu'il faudrait faire normalement, voilà.
+}
+;
+---------------------------------------------------------------------
+Cela fait finir même les conditionnelles imbriquées auxquelles la difficultée s'est avéerée ici. Tous les tests passent.
+
+arg_list : arith_exp {$<n>$ = 1;}//pour avoir une liste d'identifiants corrects 
+| arg_list VIR arith_exp {$<n>$ = $<n>1+1;}//prélude à la forme de fun_HEAD.(c'est un juste un compte TYPE!!!!)
+;
+
+bool : BOOL
+| bool OR bool
+| bool AND bool
+| NOT bool %prec UNA 
+| exp ISLT exp        {fprintf(out, "LT\n"); depile();}
+| exp ISGT exp        {fprintf(out, "GT\n"); depile();}
+| exp ISLEQ exp       {fprintf(out, "LEQ\n"); depile();}
+| exp ISGEQ exp       {fprintf(out, "GEQ\n"); depile();}
+| exp ISEQ exp        {fprintf(out, "EQ\n"); depile();}
+| LPAR bool RPAR
+;//instructions avec actions sémantiques dans ce contexte triviaux. 
+
+=>Suite pour les fonctions simples:
+===================
+================================
+==========================================================================================:
+
+voilà, tout est BON.
+
+funcall_exp : name_funcall LPAR arg_list RPAR
+{
+  int argc = get_symbol_value($1).argc;
+  if(argc != $<n>3){
+    fprintf(stderr,"Error : wrong number of function arguments (%s)\n", sid_to_string($1));
+    exit(-1);
+  }
+  fprintf(out, "CALL(call_%s)\n", sid_to_string($1));//ecriture seulement
+  //la arg list qui fera le job.(inclut celle-ci)
+  fprintf(out, "RESTORE(%d)\n", argc);//restaurationdesvaleurs comme des dépilements pour
+  //des utilisations.//depuis le début puis dépilement, mp revient à son état normal.
+  int i;
+  for(i=0; i<argc; i++) depile();//normal.
+}
+;
+
+name_funcall : ID {$$=$1; fprintf(out, "SAVEFP\n"); empile();}//fp nouveau marquant le bloc fonctionnnel(ou block fonctionnel).
+
+
+
+&&
+
+
+
+
+
+def_fun : LET fun_head EQ exp//appels d'origine.(VOILAAAA)
+{
+  $$=$2;//on remonte comme let let i= now let i=function get(x,y)=x+y;(par exemple.)
+  fprintf(out, "return;\n}\n\n");
+  //on a fini grâce à l'appel de fun_head.(qui fera le CALL DE COEUR)
+//on a appelé, on fait une écriture simple de traduction simpliste 
+/*
+puis on fait le nécessaire pour les remove_last_n_symbols (tracker=storage, tracker=tracker->next; et aussi ce qui concerne:
+add_symbol_value pour les leave_function(concerne la statique de mp dans Pcode.h
+*/
+  remove_last_n_symbols(get_argc()+1);//dépilement de la table des symboles
+  add_symbol_value($2, create_function());//marquage de la fonction (mp decrit une limite de 
+  types non cohérents)
+  leave_function();//revenir à l'instant initial de ces accolades.
+  out = stdout;//normal car out=FILE_func au tout début(les .fp après compilation soit make ./myml */ml soit make puis ./compile.sh */ml).
+}
+;
+
+
+==============================================(??)
+fun_head : ID LPAR id_list RPAR 
+{
+  $$=$1;//récupération de la valeur.
+  if(has_value($1)){
+    fprintf(stderr,"Error : cannot override a function definition (%s)\n", sid_to_string($1));
+    exit(-1);
+  }
+  add_symbol_value($1, create_function());//dans la table des symboles (~pointeur de fonctions~)
+  fprintf(out, "void call_%s(){\n", sid_to_string($1));//traduction(compilation) en p-code.
+}
+;
+=============================================(??)
+//cette partie est très claire.
+id_list : ID
+{
+  enter_function();
+  out = file_func;
+  add_symbol_value($1, create_argument());
+}
+| id_list VIR ID
+{
+  add_symbol_value($3, create_argument());
+}
+;//c'est un classique de la récursivité à droite.
+
+
+RESUME:0
+fonctions simples:
+->illustration sur un exemple
+->fichier test.p
+->fichier test.fp
+par exemple:
+let plusUn(x)=x+1;
+let y=3;
+let z=plusUn(y);
+le code p sera de cette façon:
+LOADI 3;0
+SAVEFP;
+LOAD(fp+0);
+CALL call_plusUn;
+RESTORE 1;
+on charge les arguments de la fonctions puis savefp comme barrière puis on charge les arguments qui sera fp+O 3 dans ce cas puis call_plusUn puis dernièrement RESTORE 1 cad. restaurer la valeur au point fp+1 où se trouve le rslt(mp=0 ici).///
+
+
+C'est fini.
+let x=1;
+let g(x,y)=let z=3 in (x+y+z);
+let y=2;
+let z=g(1,2);
+correspond à:
+LOADI 1 LOADI 2 
+SAVEFP
+LOADI A
+LOADI 2
+CALL call_g
+RESTORE 2
+=>La compilation de la fonction g dans test.fp:
+void call_g(){
+LOADI 3 
+LOAD(fp+1)
+LOAD(fp+2)
+ADDi
+LOAD(fp+3)
+ADDi
+DRCP;return;
+}
+avec #include "Pcode.h"
+#include "test.fp"
+int main{
+#include "test.p"
+return 0;
+}
+en fait, dans le p-code on neglige les variables let on charge les arguments directs sans load seulement savefp designe cela avec comme arguments argc-1.(apres le call)
+mais la compilation du test.fp en test.c donnera la fonction en p-code detaillee suivante(test.p vide)
+ATTENTION: apres le savefp on fait des loadi pour les arguments.(les valeurs!)
+:
+void call_g(){
+LOADI 3;
+LOAD(fp+1);//1
+LOAD(fp+2);//2
+ADDi;
+LOAD(fp+3);//3(comme ce qui précède ; le fameux restore)
+ADDi;
+donc l'état de la pile est: (->) 3 x+y+z=3+1+2=x+y+z(réèllement)=6.
+DRCP rendra la pile: 6.
+Ce qui est le bon résultat du retour de la fonction g. 
+RESTE:
+et les variables non locales aux fonctions ??
+les fonctions récursives ressemblement fortement à la syntaxe de l'asm x86.
+
+
+
+
+=>Les fonctions auxiliaires ajoutées:
+Attribut.h(le coeur)bien sur:
+
+
+//typedef int symb_value_type;
+typedef struct{
+   int offset;
+   int argc;
+} symb_value_type;
+
+symb_value_type create_symb();
+void empile();
+void depile();
+
+
+// FUNCTIONS //
+int is_in_function();
+int get_argc();
+void enter_function();
+void leave_function();
+symb_value_type create_argument();
+symb_value_type create_function();
+int is_symb_function(symb_value_type);
+
+// FILES //
+char* get_ml_file_name(char* file_path);
+char* get_file_name_with_extension(char* file_name, char* extension);
+//pour le fichier magique tester.c.
+
+
+
+#endif
+
+Table_des_symboles.h:
+=>tableau associatif limite:
+
+#include "Attribut.h"
+
+
+#include "Table_des_chaines.h"
+
+#include <stdio.h>
+
+
+
+/* type of values stored with symbols */
+
+//int has_value(sid);//est-ce que l'adresse sid se trouve dans la table des symboles.
+
+
+
+/* get the symbol value of symb_id from the symbol table */
+symb_value_type get_symbol_value(sid symb_id);
+
+/* set the value of symbol symb_id to value */
+symb_value_type set_symbol_value(sid symb_id,symb_value_type value);
+
+symb_value_type add_symbol_value(sid symb_id,symb_value_type value);
+void remove_symbol_value(sid symb_id);
+void remove_last_n_symbols(int n);
+void remove_all_symbols();
+int has_value(sid symb_id);
+int has_multiple_values(sid symb_id);
+
+// DEBUG
+void show_table();
+ 
+=>Table des chaines(tres limitee..):
+
+#include "Attribut.h"
+
+
+/* type used for string id, this could be changes with another coding */
+
+typedef void* sid;
+
+/* insert a string into the structure giving back its (unique) sid */
+sid string_to_sid(char * s);
+
+/* retreiving (already inserted) string value associated to a given sid */
+char * sid_to_string(sid i);
+
+/* check validity of an sid as being present in the strorage structure */
+int sid_valid(sid i);
+
+void remove_all_chaines();
+
+
+Voilà; projet fini.
+On a pu rester sur nos 10 au moins ici.
+========================================////////////////////////..............................
+ 
+ 
